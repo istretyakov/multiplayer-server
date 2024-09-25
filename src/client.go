@@ -47,7 +47,6 @@ func handleConnections(listener net.Listener) {
 
 		broadcastPlayerEvent(client.Id, "joined")
 
-		// Обработка сообщений от клиента в отдельной горутине
 		go handleClient(&client)
 	}
 }
@@ -60,7 +59,6 @@ func handleClient(client *Client) {
 		(*client.Connection).Close()
 	}()
 
-	// Чтение сообщений от клиента
 	decoder := json.NewDecoder(*client.Connection)
 	for {
 		var msg Message

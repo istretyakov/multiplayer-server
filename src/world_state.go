@@ -14,12 +14,12 @@ type WorldState struct {
 }
 
 type SyncWorldState struct {
-	Players   []WorldStatePlayer `json:"players"`
-	Weather   Weather            `json:"weather"`
-	Timestamp time.Time          `json:"timestamp"`
+	Players   []SyncPlayer `json:"players"`
+	Weather   Weather      `json:"weather"`
+	Timestamp time.Time    `json:"timestamp"`
 }
 
-type WorldStatePlayer struct {
+type SyncPlayer struct {
 	Id       int     `json:"id"`
 	Position Vector3 `json:"position"`
 }
@@ -35,19 +35,18 @@ var worldStateMutex sync.Mutex
 var clientsMutex sync.Mutex
 
 func sendWorldStateToClients() {
-	for _, client := range worldState.Clients {
-		closeClients := getCloseClients(*client)
+	clientsMutex.Lock()
+	defer clientsMutex.Unlock()
 
-		closePlayers := make([]WorldStatePlayer, 0)
+	for _, client := range worldState.Clients {
+		closeClients := getCloseClients(client)
+
+		closePlayers := make([]SyncPlayer, 0)
 
 		for _, closeClient := range closeClients {
-			closePlayers = append(closePlayers, WorldStatePlayer{
-				Id: closeClient.Id,
-				Position: Vector3{
-					X: closeClient.Player.Position.X,
-					Y: closeClient.Player.Position.Y,
-					Z: closeClient.Player.Position.Z,
-				},
+			closePlayers = append(closePlayers, SyncPlayer{
+				Id:       closeClient.Id,
+				Position: closeClient.Player.Position,
 			})
 		}
 
@@ -70,11 +69,11 @@ func sendWorldStateToClients() {
 	}
 }
 
-func getCloseClients(client Client) []Client {
-	var closeClients []Client
+func getCloseClients(client *Client) []*Client {
+	var closeClients []*Client
 	for _, otherClient := range worldState.Clients {
-		if distance(client.Player.Position, otherClient.Player.Position) < 300 {
-			closeClients = append(closeClients, *otherClient)
+		if client != otherClient && distance(client.Player.Position, otherClient.Player.Position) < 300 {
+			closeClients = append(closeClients, otherClient)
 		}
 	}
 	return closeClients
