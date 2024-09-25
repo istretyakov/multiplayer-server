@@ -3,10 +3,24 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/google/uuid"
+	"math"
 	"net"
 	"sync"
 	"time"
 )
+
+type Vector3 struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+	Z float64 `json:"z"`
+}
+
+type Client struct {
+	Connection *net.Conn
+	Id         uuid.UUID
+	Position   Vector3
+}
 
 // Структура для описания позиции игрока
 type Player struct {
@@ -46,7 +60,7 @@ type PlayerEvent struct {
 }
 
 var worldState WorldState
-var clients = make(map[*net.Conn]bool)
+var clients = make(map[uuid.UUID]Client)
 var clientsMutex sync.Mutex
 var worldStateMutex sync.Mutex
 
@@ -80,7 +94,7 @@ func main() {
 		worldState.Timestamp = time.Now()
 
 		// Отправка обновления всем клиентам
-		sendWorldState()
+		sendWorldStateToClients()
 	}
 }
 
@@ -92,25 +106,31 @@ func handleConnections(listener net.Listener) {
 			continue
 		}
 
+		client := Client{
+			Connection: &conn,
+			Id:         uuid.New(),
+			Position:   Vector3{X: 0.0, Y: 0.0, Z: 0.0},
+		}
+
 		clientsMutex.Lock()
-		clients[&conn] = true
+		clients[client.Id] = client
 		clientsMutex.Unlock()
 
 		// Обработка сообщений от клиента в отдельной горутине
-		go handleClient(conn)
+		go handleClient(client)
 	}
 }
 
-func handleClient(conn net.Conn) {
+func handleClient(client Client) {
 	defer func() {
 		clientsMutex.Lock()
-		delete(clients, &conn)
+		delete(clients, client.Id)
 		clientsMutex.Unlock()
-		conn.Close()
+		(*client.Connection).Close()
 	}()
 
 	// Чтение сообщений от клиента
-	decoder := json.NewDecoder(conn)
+	decoder := json.NewDecoder(*client.Connection)
 	for {
 		var msg Message
 		if err := decoder.Decode(&msg); err != nil {
@@ -125,7 +145,7 @@ func handleClient(conn net.Conn) {
 				fmt.Println("Error unmarshalling position:", err)
 				continue
 			}
-			fmt.Printf("Received position from player %s: (%f, %f, %f)\n", playerPos.ID, playerPos.X, playerPos.Y, playerPos.Z)
+			fmt.Printf("Received position from player %s: (%f, %f, %f)\n", client.Id, playerPos.X, playerPos.Y, playerPos.Z)
 			updatePlayerPosition(playerPos)
 		case "chat":
 			var chatMsg ChatMessage
@@ -200,13 +220,57 @@ func broadcastPlayerEvent(playerID, event string) {
 	broadcastMessage(msg)
 }
 
-func sendWorldState() {
-	stateData := toJson(worldState)
-	msg := Message{
-		Type:    "world_state",
-		Payload: stateData,
+func sendWorldStateToClients() {
+	for _, client := range clients {
+		closeClients := getCloseClients(client)
+
+		closePlayers := make([]Player, 0)
+
+		for _, closeClient := range closeClients {
+			closePlayers = append(closePlayers, Player{X: closeClient.Position.X, Y: closeClient.Position.Y, Z: closeClient.Position.Z})
+		}
+
+		worldStateForCurrentClient := WorldState{
+			Players:   closePlayers,
+			Weather:   worldState.Weather,
+			Timestamp: worldState.Timestamp,
+		}
+
+		stateData := toJson(worldStateForCurrentClient)
+		msg := Message{
+			Type:    "world_state",
+			Payload: stateData,
+		}
+		sendMessage(client, msg)
 	}
-	broadcastMessage(msg)
+}
+
+func getCloseClients(client Client) []Client {
+	var closeClients []Client
+	for _, otherClient := range clients {
+		if distance(client.Position, otherClient.Position) < 300 {
+			closeClients = append(closeClients, otherClient)
+		}
+	}
+	return closeClients
+}
+
+func distance(a, b Vector3) float64 {
+	return math.Sqrt(math.Pow(a.X-b.X, 2) + math.Pow(a.Y-b.Y, 2) + math.Pow(a.Z-b.Z, 2))
+}
+
+func sendMessage(client Client, msg Message) {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		fmt.Println("Error marshalling message:", err)
+		return
+	}
+
+	if _, err := (*client.Connection).Write(data); err != nil {
+		fmt.Println("Error sending data to client:", err)
+		(*client.Connection).Close()
+		delete(clients, client.Id)
+	}
 }
 
 func broadcastMessage(msg Message) {
@@ -219,11 +283,11 @@ func broadcastMessage(msg Message) {
 		return
 	}
 
-	for conn := range clients {
-		if _, err := (*conn).Write(data); err != nil {
+	for id, client := range clients {
+		if _, err := (*client.Connection).Write(data); err != nil {
 			fmt.Println("Error sending data to client:", err)
-			(*conn).Close()
-			delete(clients, conn)
+			(*client.Connection).Close()
+			delete(clients, id)
 		}
 	}
 }
