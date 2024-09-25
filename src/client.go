@@ -14,6 +14,7 @@ type Client struct {
 
 type Player struct {
 	Position Vector3
+	Velocity Vector3
 }
 
 type ChatMessage struct {
@@ -39,7 +40,10 @@ func handleConnections(listener net.Listener) {
 		client := Client{
 			Connection: &conn,
 			Id:         getSmallestAvailabeId(),
-			Player:     Player{Position: Vector3{X: 0.0, Y: 0.0, Z: 0.0}},
+			Player: Player{
+				Position: Vector3{X: 0.0, Y: 0.0, Z: 0.0},
+				Velocity: Vector3{X: 0.0, Y: 0.0, Z: 0.0},
+			},
 		}
 
 		worldState.Clients[client.Id] = &client
@@ -74,7 +78,7 @@ func handleClient(client *Client) {
 				fmt.Println("Error unmarshalling position:", err)
 				continue
 			}
-			fmt.Printf("Received position from player %s: (%f, %f, %f)\n", client.Id, playerPos.Position.X, playerPos.Position.Y, playerPos.Position.Z)
+			fmt.Printf("Received position from player %d: (%f, %f, %f) (%f, %f, %f)\n", client.Id, playerPos.Position.X, playerPos.Position.Y, playerPos.Position.Z, playerPos.Velocity.X, playerPos.Velocity.Y, playerPos.Velocity.Z)
 			updatePlayerPosition(client, playerPos)
 		case "chat":
 			var chatMsg ChatMessage
@@ -134,6 +138,7 @@ func updatePlayerPosition(client *Client, playerPos UpdatedPlayerState) {
 	defer worldStateMutex.Unlock()
 
 	client.Player.Position = playerPos.Position
+	client.Player.Velocity = playerPos.Velocity
 }
 
 func getSmallestAvailabeId() int {

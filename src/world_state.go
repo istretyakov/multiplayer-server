@@ -22,6 +22,7 @@ type SyncWorldState struct {
 type SyncPlayer struct {
 	Id       int     `json:"id"`
 	Position Vector3 `json:"position"`
+	Velocity Vector3 `json:"velocity"`
 }
 
 type Weather struct {
@@ -47,6 +48,7 @@ func sendWorldStateToClients() {
 			closePlayers = append(closePlayers, SyncPlayer{
 				Id:       closeClient.Id,
 				Position: closeClient.Player.Position,
+				Velocity: closeClient.Player.Velocity,
 			})
 		}
 

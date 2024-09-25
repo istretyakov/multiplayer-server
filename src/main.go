@@ -6,9 +6,9 @@ import (
 	"time"
 )
 
-// Структура для описания позиции игрока
 type UpdatedPlayerState struct {
 	Position Vector3 `json:"position"`
+	Velocity Vector3 `json:"velocity"`
 }
 
 func main() {
