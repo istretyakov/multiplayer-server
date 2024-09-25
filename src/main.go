@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/google/uuid"
 	"math"
 	"net"
 	"sync"
@@ -18,16 +17,17 @@ type Vector3 struct {
 
 type Client struct {
 	Connection *net.Conn
-	Id         uuid.UUID
-	Position   Vector3
+	Id         int
+	Player     Player
+}
+
+type Player struct {
+	Position Vector3
 }
 
 // Структура для описания позиции игрока
-type Player struct {
-	ID string  `json:"id"`
-	X  float64 `json:"x"`
-	Y  float64 `json:"y"`
-	Z  float64 `json:"z"`
+type UpdatedPlayerState struct {
+	Position Vector3 `json:"position"`
 }
 
 // Структура для "погоды"
@@ -36,11 +36,16 @@ type Weather struct {
 	Temperature float64 `json:"temperature"`
 }
 
+type WorldStatePlayer struct {
+	Id       int     `json:"id"`
+	Position Vector3 `json:"position"`
+}
+
 // Структура для "мира" с игроками и погодой
 type WorldState struct {
-	Players   []Player  `json:"players"`
-	Weather   Weather   `json:"weather"`
-	Timestamp time.Time `json:"timestamp"`
+	Players   []WorldStatePlayer `json:"players"`
+	Weather   Weather            `json:"weather"`
+	Timestamp time.Time          `json:"timestamp"`
 }
 
 // Структуры для различных типов сообщений
@@ -55,19 +60,19 @@ type ChatMessage struct {
 }
 
 type PlayerEvent struct {
-	ID    string `json:"id"`
+	Id    int    `json:"id"`
 	Event string `json:"event"` // Тип события: "joined", "left"
 }
 
 var worldState WorldState
-var clients = make(map[uuid.UUID]Client)
+var clients = make(map[int]*Client)
 var clientsMutex sync.Mutex
 var worldStateMutex sync.Mutex
 
 func main() {
 	// Инициализация начального состояния мира.
 	worldState = WorldState{
-		Players:   []Player{},
+		Players:   []WorldStatePlayer{},
 		Weather:   Weather{Condition: "Sunny", Temperature: 25.0},
 		Timestamp: time.Now(),
 	}
@@ -106,22 +111,25 @@ func handleConnections(listener net.Listener) {
 			continue
 		}
 
+		clientsMutex.Lock()
+
 		client := Client{
 			Connection: &conn,
-			Id:         uuid.New(),
-			Position:   Vector3{X: 0.0, Y: 0.0, Z: 0.0},
+			Id:         getSmallestAvailabeId(),
+			Player:     Player{Position: Vector3{X: 0.0, Y: 0.0, Z: 0.0}},
 		}
 
-		clientsMutex.Lock()
-		clients[client.Id] = client
+		clients[client.Id] = &client
 		clientsMutex.Unlock()
 
+		broadcastPlayerEvent(client.Id, "joined")
+
 		// Обработка сообщений от клиента в отдельной горутине
-		go handleClient(client)
+		go handleClient(&client)
 	}
 }
 
-func handleClient(client Client) {
+func handleClient(client *Client) {
 	defer func() {
 		clientsMutex.Lock()
 		delete(clients, client.Id)
@@ -140,13 +148,13 @@ func handleClient(client Client) {
 
 		switch msg.Type {
 		case "position":
-			var playerPos Player
+			var playerPos UpdatedPlayerState
 			if err := json.Unmarshal(msg.Payload, &playerPos); err != nil {
 				fmt.Println("Error unmarshalling position:", err)
 				continue
 			}
-			fmt.Printf("Received position from player %s: (%f, %f, %f)\n", client.Id, playerPos.X, playerPos.Y, playerPos.Z)
-			updatePlayerPosition(playerPos)
+			fmt.Printf("Received position from player %s: (%f, %f, %f)\n", client.Id, playerPos.Position.X, playerPos.Position.Y, playerPos.Position.Z)
+			updatePlayerPosition(client, playerPos)
 		case "chat":
 			var chatMsg ChatMessage
 			if err := json.Unmarshal(msg.Payload, &chatMsg); err != nil {
@@ -157,15 +165,9 @@ func handleClient(client Client) {
 			// Здесь можно добавить код для рассылки чата всем клиентам
 			broadcastChatMessage(chatMsg)
 		case "exit":
-			var player Player
-			if err := json.Unmarshal(msg.Payload, &player); err != nil {
-				fmt.Println("Error unmarshalling exit message:", err)
-				continue
-			}
-			fmt.Printf("Player %s has exited\n", player.ID)
+			fmt.Printf("UpdatedPlayerState %s has exited\n", client.Id)
 			// Уведомление о выходе игрока
-			broadcastPlayerEvent(player.ID, "left")
-			removePlayer(player)
+			broadcastPlayerEvent(client.Id, "left")
 			return
 		default:
 			fmt.Println("Received unknown message type:", msg.Type)
@@ -173,31 +175,11 @@ func handleClient(client Client) {
 	}
 }
 
-func updatePlayerPosition(playerPos Player) {
+func updatePlayerPosition(client *Client, playerPos UpdatedPlayerState) {
 	worldStateMutex.Lock()
 	defer worldStateMutex.Unlock()
 
-	for i, player := range worldState.Players {
-		if player.ID == playerPos.ID {
-			worldState.Players[i] = playerPos
-			return
-		}
-	}
-	worldState.Players = append(worldState.Players, playerPos)
-	// Уведомление о новом игроке
-	broadcastPlayerEvent(playerPos.ID, "joined")
-}
-
-func removePlayer(player Player) {
-	worldStateMutex.Lock()
-	defer worldStateMutex.Unlock()
-
-	for i, p := range worldState.Players {
-		if p.ID == player.ID {
-			worldState.Players = append(worldState.Players[:i], worldState.Players[i+1:]...)
-			break
-		}
-	}
+	client.Player.Position = playerPos.Position
 }
 
 func broadcastChatMessage(chatMsg ChatMessage) {
@@ -208,9 +190,9 @@ func broadcastChatMessage(chatMsg ChatMessage) {
 	broadcastMessage(msg)
 }
 
-func broadcastPlayerEvent(playerID, event string) {
+func broadcastPlayerEvent(playerID int, event string) {
 	playerEvent := PlayerEvent{
-		ID:    playerID,
+		Id:    playerID,
 		Event: event,
 	}
 	msg := Message{
@@ -222,12 +204,12 @@ func broadcastPlayerEvent(playerID, event string) {
 
 func sendWorldStateToClients() {
 	for _, client := range clients {
-		closeClients := getCloseClients(client)
+		closeClients := getCloseClients(*client)
 
-		closePlayers := make([]Player, 0)
+		closePlayers := make([]WorldStatePlayer, 0)
 
 		for _, closeClient := range closeClients {
-			closePlayers = append(closePlayers, Player{X: closeClient.Position.X, Y: closeClient.Position.Y, Z: closeClient.Position.Z})
+			closePlayers = append(closePlayers, WorldStatePlayer{Id: closeClient.Id, Position: Vector3{X: closeClient.Player.Position.X, Y: closeClient.Player.Position.Y, Z: closeClient.Player.Position.Z}})
 		}
 
 		worldStateForCurrentClient := WorldState{
@@ -241,15 +223,15 @@ func sendWorldStateToClients() {
 			Type:    "world_state",
 			Payload: stateData,
 		}
-		sendMessage(client, msg)
+		sendMessage(*client, msg)
 	}
 }
 
 func getCloseClients(client Client) []Client {
 	var closeClients []Client
 	for _, otherClient := range clients {
-		if distance(client.Position, otherClient.Position) < 300 {
-			closeClients = append(closeClients, otherClient)
+		if distance(client.Player.Position, otherClient.Player.Position) < 300 {
+			closeClients = append(closeClients, *otherClient)
 		}
 	}
 	return closeClients
@@ -298,4 +280,17 @@ func toJson(v interface{}) json.RawMessage {
 		fmt.Println("Error marshalling to JSON:", err)
 	}
 	return data
+}
+
+func getSmallestAvailabeId() int {
+	smallestId := 0
+
+	for id := 0; id < len(clients)+1; id++ {
+		if _, ok := clients[id]; !ok {
+			smallestId = id
+			break
+		}
+	}
+
+	return smallestId
 }
