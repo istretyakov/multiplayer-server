@@ -6,6 +6,26 @@ import (
 	"net"
 )
 
+type Client struct {
+	Connection *net.Conn
+	Id         int
+	Player     Player
+}
+
+type Player struct {
+	Position Vector3
+}
+
+type ChatMessage struct {
+	ID      string `json:"id"`
+	Message string `json:"message"`
+}
+
+type PlayerEvent struct {
+	Id    int    `json:"id"`
+	Event string `json:"event"` // Тип события: "joined", "left"
+}
+
 func handleConnections(listener net.Listener) {
 	for {
 		conn, err := listener.Accept()
@@ -79,21 +99,34 @@ func handleClient(client *Client) {
 }
 
 func broadcastChatMessage(chatMsg ChatMessage) {
+	data, err := json.Marshal(chatMsg)
+	if err != nil {
+		fmt.Println("Error marshalling to JSON:", err)
+		return
+	}
+
 	msg := Message{
 		Type:    "chat",
-		Payload: toJson(chatMsg),
+		Payload: data,
 	}
 	broadcastMessage(msg)
 }
 
-func broadcastPlayerEvent(playerID int, event string) {
+func broadcastPlayerEvent(playerId int, event string) {
 	playerEvent := PlayerEvent{
-		Id:    playerID,
+		Id:    playerId,
 		Event: event,
 	}
+
+	data, err := json.Marshal(playerEvent)
+	if err != nil {
+		fmt.Println("Error marshalling to JSON:", err)
+		return
+	}
+
 	msg := Message{
 		Type:    "player_event",
-		Payload: toJson(playerEvent),
+		Payload: data,
 	}
 	broadcastMessage(msg)
 }

@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"math"
 	"sync"
 	"time"
 )
@@ -18,6 +17,11 @@ type SyncWorldState struct {
 	Players   []WorldStatePlayer `json:"players"`
 	Weather   Weather            `json:"weather"`
 	Timestamp time.Time          `json:"timestamp"`
+}
+
+type WorldStatePlayer struct {
+	Id       int     `json:"id"`
+	Position Vector3 `json:"position"`
 }
 
 type Weather struct {
@@ -37,7 +41,14 @@ func sendWorldStateToClients() {
 		closePlayers := make([]WorldStatePlayer, 0)
 
 		for _, closeClient := range closeClients {
-			closePlayers = append(closePlayers, WorldStatePlayer{Id: closeClient.Id, Position: Vector3{X: closeClient.Player.Position.X, Y: closeClient.Player.Position.Y, Z: closeClient.Player.Position.Z}})
+			closePlayers = append(closePlayers, WorldStatePlayer{
+				Id: closeClient.Id,
+				Position: Vector3{
+					X: closeClient.Player.Position.X,
+					Y: closeClient.Player.Position.Y,
+					Z: closeClient.Player.Position.Z,
+				},
+			})
 		}
 
 		worldStateForCurrentClient := SyncWorldState{
@@ -46,10 +57,14 @@ func sendWorldStateToClients() {
 			Timestamp: worldState.Timestamp,
 		}
 
-		stateData := toJson(worldStateForCurrentClient)
+		data, err := json.Marshal(worldStateForCurrentClient)
+		if err != nil {
+			fmt.Println("Error marshalling to JSON:", err)
+			break
+		}
 		msg := Message{
 			Type:    "world_state",
-			Payload: stateData,
+			Payload: data,
 		}
 		sendMessage(*client, msg)
 	}
@@ -63,16 +78,4 @@ func getCloseClients(client Client) []Client {
 		}
 	}
 	return closeClients
-}
-
-func distance(a, b Vector3) float64 {
-	return math.Sqrt(math.Pow(a.X-b.X, 2) + math.Pow(a.Y-b.Y, 2) + math.Pow(a.Z-b.Z, 2))
-}
-
-func toJson(v interface{}) json.RawMessage {
-	data, err := json.Marshal(v)
-	if err != nil {
-		fmt.Println("Error marshalling to JSON:", err)
-	}
-	return data
 }

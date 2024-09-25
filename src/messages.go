@@ -5,6 +5,11 @@ import (
 	"fmt"
 )
 
+type Message struct {
+	Type    string          `json:"type"`    // Тип сообщения: "position", "chat", "exit"
+	Payload json.RawMessage `json:"payload"` // Данные сообщения зависят от типа
+}
+
 func sendMessage(client Client, msg Message) {
 	data, err := json.Marshal(msg)
 	if err != nil {
