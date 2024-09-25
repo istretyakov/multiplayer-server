@@ -22,7 +22,7 @@ func handleConnections(listener net.Listener) {
 			Player:     Player{Position: Vector3{X: 0.0, Y: 0.0, Z: 0.0}},
 		}
 
-		clients[client.Id] = &client
+		worldState.Clients[client.Id] = &client
 		clientsMutex.Unlock()
 
 		broadcastPlayerEvent(client.Id, "joined")
@@ -35,7 +35,7 @@ func handleConnections(listener net.Listener) {
 func handleClient(client *Client) {
 	defer func() {
 		clientsMutex.Lock()
-		delete(clients, client.Id)
+		delete(worldState.Clients, client.Id)
 		clientsMutex.Unlock()
 		(*client.Connection).Close()
 	}()
@@ -108,8 +108,8 @@ func updatePlayerPosition(client *Client, playerPos UpdatedPlayerState) {
 func getSmallestAvailabeId() int {
 	smallestId := 0
 
-	for id := 0; id < len(clients)+1; id++ {
-		if _, ok := clients[id]; !ok {
+	for id := 0; id < len(worldState.Clients)+1; id++ {
+		if _, ok := worldState.Clients[id]; !ok {
 			smallestId = id
 			break
 		}

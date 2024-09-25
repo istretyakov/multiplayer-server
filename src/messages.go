@@ -17,7 +17,7 @@ func sendMessage(client Client, msg Message) {
 	if _, err := (*client.Connection).Write(data); err != nil {
 		fmt.Println("Error sending data to client:", err)
 		(*client.Connection).Close()
-		delete(clients, client.Id)
+		delete(worldState.Clients, client.Id)
 	}
 }
 
@@ -33,11 +33,11 @@ func broadcastMessage(msg Message) {
 
 	data = append(data, byte(0))
 
-	for id, client := range clients {
+	for id, client := range worldState.Clients {
 		if _, err := (*client.Connection).Write(data); err != nil {
 			fmt.Println("Error sending data to client:", err)
 			(*client.Connection).Close()
-			delete(clients, id)
+			delete(worldState.Clients, id)
 		}
 	}
 }

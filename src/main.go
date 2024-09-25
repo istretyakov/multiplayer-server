@@ -3,9 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"math"
 	"net"
-	"sync"
 	"time"
 )
 
@@ -30,28 +28,9 @@ type UpdatedPlayerState struct {
 	Position Vector3 `json:"position"`
 }
 
-// Структура для "погоды"
-type Weather struct {
-	Condition   string  `json:"condition"`
-	Temperature float64 `json:"temperature"`
-}
-
 type WorldStatePlayer struct {
 	Id       int     `json:"id"`
 	Position Vector3 `json:"position"`
-}
-
-// Структура для "мира" с игроками и погодой
-type SyncWorldState struct {
-	Players   []WorldStatePlayer `json:"players"`
-	Weather   Weather            `json:"weather"`
-	Timestamp time.Time          `json:"timestamp"`
-}
-
-type WorldState struct {
-	Clients   []Client
-	Weather   Weather
-	Timestamp time.Time
 }
 
 // Структуры для различных типов сообщений
@@ -70,15 +49,10 @@ type PlayerEvent struct {
 	Event string `json:"event"` // Тип события: "joined", "left"
 }
 
-var worldState SyncWorldState
-var clients = make(map[int]*Client)
-var clientsMutex sync.Mutex
-var worldStateMutex sync.Mutex
-
 func main() {
 	// Инициализация начального состояния мира.
-	worldState = SyncWorldState{
-		Players:   []WorldStatePlayer{},
+	worldState = WorldState{
+		Clients:   make(map[int]*Client),
 		Weather:   Weather{Condition: "Sunny", Temperature: 25.0},
 		Timestamp: time.Now(),
 	}
@@ -107,51 +81,4 @@ func main() {
 		// Отправка обновления всем клиентам
 		sendWorldStateToClients()
 	}
-}
-
-func sendWorldStateToClients() {
-	for _, client := range clients {
-		closeClients := getCloseClients(*client)
-
-		closePlayers := make([]WorldStatePlayer, 0)
-
-		for _, closeClient := range closeClients {
-			closePlayers = append(closePlayers, WorldStatePlayer{Id: closeClient.Id, Position: Vector3{X: closeClient.Player.Position.X, Y: closeClient.Player.Position.Y, Z: closeClient.Player.Position.Z}})
-		}
-
-		worldStateForCurrentClient := SyncWorldState{
-			Players:   closePlayers,
-			Weather:   worldState.Weather,
-			Timestamp: worldState.Timestamp,
-		}
-
-		stateData := toJson(worldStateForCurrentClient)
-		msg := Message{
-			Type:    "world_state",
-			Payload: stateData,
-		}
-		sendMessage(*client, msg)
-	}
-}
-
-func getCloseClients(client Client) []Client {
-	var closeClients []Client
-	for _, otherClient := range clients {
-		if distance(client.Player.Position, otherClient.Player.Position) < 300 {
-			closeClients = append(closeClients, *otherClient)
-		}
-	}
-	return closeClients
-}
-
-func distance(a, b Vector3) float64 {
-	return math.Sqrt(math.Pow(a.X-b.X, 2) + math.Pow(a.Y-b.Y, 2) + math.Pow(a.Z-b.Z, 2))
-}
-
-func toJson(v interface{}) json.RawMessage {
-	data, err := json.Marshal(v)
-	if err != nil {
-		fmt.Println("Error marshalling to JSON:", err)
-	}
-	return data
 }
