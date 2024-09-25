@@ -148,22 +148,6 @@ func distance(a, b Vector3) float64 {
 	return math.Sqrt(math.Pow(a.X-b.X, 2) + math.Pow(a.Y-b.Y, 2) + math.Pow(a.Z-b.Z, 2))
 }
 
-func sendMessage(client Client, msg Message) {
-	data, err := json.Marshal(msg)
-	if err != nil {
-		fmt.Println("Error marshalling message:", err)
-		return
-	}
-
-	data = append(data, byte(0))
-
-	if _, err := (*client.Connection).Write(data); err != nil {
-		fmt.Println("Error sending data to client:", err)
-		(*client.Connection).Close()
-		delete(clients, client.Id)
-	}
-}
-
 func toJson(v interface{}) json.RawMessage {
 	data, err := json.Marshal(v)
 	if err != nil {
