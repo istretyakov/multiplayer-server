@@ -42,10 +42,16 @@ type WorldStatePlayer struct {
 }
 
 // Структура для "мира" с игроками и погодой
-type WorldState struct {
+type SyncWorldState struct {
 	Players   []WorldStatePlayer `json:"players"`
 	Weather   Weather            `json:"weather"`
 	Timestamp time.Time          `json:"timestamp"`
+}
+
+type WorldState struct {
+	Clients   []Client
+	Weather   Weather
+	Timestamp time.Time
 }
 
 // Структуры для различных типов сообщений
@@ -64,14 +70,14 @@ type PlayerEvent struct {
 	Event string `json:"event"` // Тип события: "joined", "left"
 }
 
-var worldState WorldState
+var worldState SyncWorldState
 var clients = make(map[int]*Client)
 var clientsMutex sync.Mutex
 var worldStateMutex sync.Mutex
 
 func main() {
 	// Инициализация начального состояния мира.
-	worldState = WorldState{
+	worldState = SyncWorldState{
 		Players:   []WorldStatePlayer{},
 		Weather:   Weather{Condition: "Sunny", Temperature: 25.0},
 		Timestamp: time.Now(),
@@ -103,105 +109,6 @@ func main() {
 	}
 }
 
-func handleConnections(listener net.Listener) {
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			fmt.Println("Error accepting connection:", err)
-			continue
-		}
-
-		clientsMutex.Lock()
-
-		client := Client{
-			Connection: &conn,
-			Id:         getSmallestAvailabeId(),
-			Player:     Player{Position: Vector3{X: 0.0, Y: 0.0, Z: 0.0}},
-		}
-
-		clients[client.Id] = &client
-		clientsMutex.Unlock()
-
-		broadcastPlayerEvent(client.Id, "joined")
-
-		// Обработка сообщений от клиента в отдельной горутине
-		go handleClient(&client)
-	}
-}
-
-func handleClient(client *Client) {
-	defer func() {
-		clientsMutex.Lock()
-		delete(clients, client.Id)
-		clientsMutex.Unlock()
-		(*client.Connection).Close()
-	}()
-
-	// Чтение сообщений от клиента
-	decoder := json.NewDecoder(*client.Connection)
-	for {
-		var msg Message
-		if err := decoder.Decode(&msg); err != nil {
-			fmt.Println("Error reading from client:", err)
-			break
-		}
-
-		switch msg.Type {
-		case "position":
-			var playerPos UpdatedPlayerState
-			if err := json.Unmarshal(msg.Payload, &playerPos); err != nil {
-				fmt.Println("Error unmarshalling position:", err)
-				continue
-			}
-			fmt.Printf("Received position from player %s: (%f, %f, %f)\n", client.Id, playerPos.Position.X, playerPos.Position.Y, playerPos.Position.Z)
-			updatePlayerPosition(client, playerPos)
-		case "chat":
-			var chatMsg ChatMessage
-			if err := json.Unmarshal(msg.Payload, &chatMsg); err != nil {
-				fmt.Println("Error unmarshalling chat message:", err)
-				continue
-			}
-			fmt.Printf("Chat message from player %s: %s\n", chatMsg.ID, chatMsg.Message)
-			// Здесь можно добавить код для рассылки чата всем клиентам
-			broadcastChatMessage(chatMsg)
-		case "exit":
-			fmt.Printf("UpdatedPlayerState %s has exited\n", client.Id)
-			// Уведомление о выходе игрока
-			broadcastPlayerEvent(client.Id, "left")
-			return
-		default:
-			fmt.Println("Received unknown message type:", msg.Type)
-		}
-	}
-}
-
-func updatePlayerPosition(client *Client, playerPos UpdatedPlayerState) {
-	worldStateMutex.Lock()
-	defer worldStateMutex.Unlock()
-
-	client.Player.Position = playerPos.Position
-}
-
-func broadcastChatMessage(chatMsg ChatMessage) {
-	msg := Message{
-		Type:    "chat",
-		Payload: toJson(chatMsg),
-	}
-	broadcastMessage(msg)
-}
-
-func broadcastPlayerEvent(playerID int, event string) {
-	playerEvent := PlayerEvent{
-		Id:    playerID,
-		Event: event,
-	}
-	msg := Message{
-		Type:    "player_event",
-		Payload: toJson(playerEvent),
-	}
-	broadcastMessage(msg)
-}
-
 func sendWorldStateToClients() {
 	for _, client := range clients {
 		closeClients := getCloseClients(*client)
@@ -212,7 +119,7 @@ func sendWorldStateToClients() {
 			closePlayers = append(closePlayers, WorldStatePlayer{Id: closeClient.Id, Position: Vector3{X: closeClient.Player.Position.X, Y: closeClient.Player.Position.Y, Z: closeClient.Player.Position.Z}})
 		}
 
-		worldStateForCurrentClient := WorldState{
+		worldStateForCurrentClient := SyncWorldState{
 			Players:   closePlayers,
 			Weather:   worldState.Weather,
 			Timestamp: worldState.Timestamp,
@@ -248,29 +155,12 @@ func sendMessage(client Client, msg Message) {
 		return
 	}
 
+	data = append(data, byte(0))
+
 	if _, err := (*client.Connection).Write(data); err != nil {
 		fmt.Println("Error sending data to client:", err)
 		(*client.Connection).Close()
 		delete(clients, client.Id)
-	}
-}
-
-func broadcastMessage(msg Message) {
-	clientsMutex.Lock()
-	defer clientsMutex.Unlock()
-
-	data, err := json.Marshal(msg)
-	if err != nil {
-		fmt.Println("Error marshalling message:", err)
-		return
-	}
-
-	for id, client := range clients {
-		if _, err := (*client.Connection).Write(data); err != nil {
-			fmt.Println("Error sending data to client:", err)
-			(*client.Connection).Close()
-			delete(clients, id)
-		}
 	}
 }
 
@@ -280,17 +170,4 @@ func toJson(v interface{}) json.RawMessage {
 		fmt.Println("Error marshalling to JSON:", err)
 	}
 	return data
-}
-
-func getSmallestAvailabeId() int {
-	smallestId := 0
-
-	for id := 0; id < len(clients)+1; id++ {
-		if _, ok := clients[id]; !ok {
-			smallestId = id
-			break
-		}
-	}
-
-	return smallestId
 }
