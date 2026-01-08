@@ -2,21 +2,20 @@ package main
 
 import (
 	"fmt"
+	"multiplayer-server/internal/models"
+	"multiplayer-server/internal/server"
 	"net"
 	"time"
 )
 
-type UpdatedPlayerState struct {
-	Position Vector3 `json:"position"`
-	Velocity Vector3 `json:"velocity"`
-}
-
 func main() {
-	worldState = WorldState{
-		Clients:   make(map[int]*Client),
-		Weather:   Weather{Condition: "Sunny", Temperature: 25.0},
+	worldState := models.WorldState{
+		Clients:   make(map[int]*models.Client),
+		Weather:   models.Weather{Condition: "Sunny", Temperature: 25.0},
 		Timestamp: time.Now(),
 	}
+
+	server.Init(&worldState)
 
 	listener, err := net.Listen("tcp", ":8080")
 	if err != nil {
@@ -27,14 +26,13 @@ func main() {
 
 	fmt.Println("Server started on port 8080")
 
-	go handleConnections(listener)
+	go server.HandleConnections(listener)
 
 	ticker := time.NewTicker(time.Second / 10)
 	defer ticker.Stop()
 
 	for range ticker.C {
-		worldState.Timestamp = time.Now()
-
-		sendWorldStateToClients()
+		server.UpdateTimestamp(time.Now())
+		server.SendWorldStateToClients()
 	}
 }
