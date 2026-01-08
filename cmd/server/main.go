@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"multiplayer-server/internal/config"
 	"multiplayer-server/internal/models"
 	"multiplayer-server/internal/server"
 	"net"
@@ -9,6 +10,13 @@ import (
 )
 
 func main() {
+	if err := config.Load(); err != nil {
+		fmt.Println("Error loading config:", err)
+		return
+	}
+
+	cfg := config.Get()
+
 	worldState := models.WorldState{
 		Clients:   make(map[int]*models.Client),
 		Weather:   models.Weather{Condition: "Sunny", Temperature: 25.0},
@@ -17,14 +25,15 @@ func main() {
 
 	server.Init(&worldState)
 
-	listener, err := net.Listen("tcp", ":8080")
+	address := ":" + cfg.ServerPort
+	listener, err := net.Listen("tcp", address)
 	if err != nil {
 		fmt.Println("Error starting server:", err)
 		return
 	}
 	defer listener.Close()
 
-	fmt.Println("Server started on port 8080")
+	fmt.Printf("Server started on port %s\n", cfg.ServerPort)
 
 	go server.HandleConnections(listener)
 
